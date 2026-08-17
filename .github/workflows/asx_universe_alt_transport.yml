@@ -1,0 +1,94 @@
+# asx_universe_alt_transport.yml -- v1.0
+#
+# GitHub Actions workflow for the asx-universe-fetcher Lambda's alt-transport
+# pull model (ASX_Universe_Fetcher_Fallback3_Design_v0_1.md v0.5, §3).
+#
+# Runs on a GitHub-hosted runner -- a non-AWS egress path, different
+# Autonomous System Number from AWS Lambda -- and calls the companion script
+# fetch_and_publish_asx_csv.py, which independently re-fetches the same two
+# official ASX CSV sources the Lambda tries directly and, on the first one
+# that passes a plausibility check, publishes it (plus a freshness sidecar)
+# to THIS repo for the Lambda to read over plain HTTPS.
+#
+# Zero AWS credential, zero new IAM identity, zero GitHub secret: the ONLY
+# permission this workflow needs is `contents: write` on its own repo, using
+# the automatically-provisioned GITHUB_TOKEN, to commit the published files
+# back to itself.
+#
+# MANUAL SETUP: see the top-of-file docstring in the companion script
+# (2026-08-17_fetch_and_publish_asx_csv_v1_0_0800.py, same folder as this
+# file) for the full one-off setup Matt performs. In the target repo this
+# file goes at .github/workflows/asx_universe_alt_transport.yml and the
+# script goes at scripts/fetch_and_publish_asx_csv.py -- the `run:` step
+# below assumes that exact path.
+
+name: ASX Universe Alt-Transport Publisher
+
+on:
+  schedule:
+    # Design §3.3 / §8 P-RUNNER-LEAD [placeholder, TBD Matt -- default 30
+    # min]: targets ~30 min before the Lambda's own Sat 04:00 AWST run
+    # (= Fri 20:00 UTC), i.e. Fri 19:30 UTC. GitHub's hosted `schedule` cron
+    # is, from memory, best-effort (may be delayed or skipped under load --
+    # UNVERIFIED, design §9 item 7, verify at setup). This is exactly why
+    # the Lambda-side P-ALT freshness gate -- not this schedule -- is the
+    # real protection against a late or skipped run; this cron is a target,
+    # not a guarantee.
+    - cron: '30 19 * * 5'
+  workflow_dispatch: {}   # manual trigger -- use this for the first-ever
+                          # end-to-end test before relying on the schedule
+
+permissions:
+  contents: write   # the ONLY permission this workflow needs. No AWS
+                     # credential, no OIDC, no other GitHub permission.
+
+concurrency:
+  group: asx-alt-transport-publish
+  cancel-in-progress: false   # never cancel a run already in progress --
+                               # let it finish or fail cleanly rather than
+                               # risk a half-written published/ commit
+
+jobs:
+  fetch_and_publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Fetch ASX CSV from non-AWS egress and validate
+        id: fetch
+        run: python scripts/fetch_and_publish_asx_csv.py
+        # Writes published/ASXListedCompanies.csv + published/manifest.json
+        # on success, and ALWAYS writes published/heartbeat.json (design
+        # §3.5 keepalive -- see the script's own docstring). Exits non-zero
+        # on total failure (both sources unusable), which fails this step
+        # and the whole run -- visible as a red X in the Actions history
+        # (design §3.3: "fail loudly, publish nothing").
+
+      - name: Commit and push published artifacts (runs even if fetch failed)
+        if: always()
+        run: |
+          git config user.name "asx-alt-transport-bot"
+          git config user.email "actions@github.com"
+          git add published/heartbeat.json
+          git add published/ASXListedCompanies.csv published/manifest.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit (identical to last published run)."
+            exit 0
+          fi
+          git commit -m "Alt-transport publish $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
+        # `if: always()` is deliberate: even when the fetch step above
+        # failed (exit 1), this step still runs and still commits/pushes
+        # published/heartbeat.json -- the design §3.5 keepalive against
+        # GitHub's documented inactivity auto-disable of `schedule`-
+        # triggered workflows. The JOB as a whole still reports FAILED
+        # (GitHub Actions' default behaviour when an earlier step failed),
+        # so a real fetch failure stays visible -- this step only ensures
+        # the repo shows weekly git activity regardless of that outcome.
