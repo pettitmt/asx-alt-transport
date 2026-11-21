@@ -1,8 +1,8 @@
 {
-  "fetched_at": "2026-11-14T00:23:26.827278+00:00",
+  "fetched_at": "2026-11-21T00:52:35.499417+00:00",
   "source_kind": "markitdigital_directory",
   "source_url": "https://asx.api.markitdigital.com/asx-research/1.0/companies/directory/file?access_token=83ff96335c2d45a094df02a206a39ff4",
-  "row_count": 1832,
-  "size_bytes": 134702,
-  "checksum_sha256": "051df1b7c0d163f382b82836657e5431d349b2eddc2e12037c6c96aab08f0ce7"
+  "row_count": 1831,
+  "size_bytes": 134576,
+  "checksum_sha256": "594c790a0653286a1ba6bd8d3ed7acd14b2a8643392c3e928ea9cf15d9f3527b"
 }
